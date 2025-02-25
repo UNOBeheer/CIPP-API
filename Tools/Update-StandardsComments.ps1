@@ -13,16 +13,40 @@
 .OUTPUTS
     None. The script modifies the CIPP standard files directly.
 
+.NOTES
+    .FUNCTIONALITY Internal needs to be present in the comment block for the script, otherwise it will not be updated.
+    This is done as a safety measure to avoid updating the wrong files.
+
 .EXAMPLE
     Update-StandardsComments.ps1
 
     This example runs the script to update the comment block in the CIPP standard files.
 
-
 #>
 param (
     [switch]$WhatIf
 )
+
+
+function EscapeMarkdown([object]$InputObject) {
+    # https://github.com/microsoft/FormatPowerShellToMarkdownTable/blob/master/src/FormatMarkdownTable/FormatMarkdownTable.psm1
+    $Temp = ''
+
+    if ($null -eq $InputObject) {
+        return ''
+    } elseif ($InputObject.GetType().BaseType -eq [System.Array]) {
+        $Temp = '{' + [System.String]::Join(', ', $InputObject) + '}'
+    } elseif ($InputObject.GetType() -eq [System.Collections.ArrayList] -or $InputObject.GetType().ToString().StartsWith('System.Collections.Generic.List')) {
+        $Temp = '{' + [System.String]::Join(', ', $InputObject.ToArray()) + '}'
+    } elseif (Get-Member -InputObject $InputObject -Name ToString -MemberType Method) {
+        $Temp = $InputObject.ToString()
+    } else {
+        $Temp = ''
+    }
+
+    return $Temp.Replace('\', '\\').Replace('*', '\*').Replace('_', '\_').Replace("``", "\``").Replace('$', '\$').Replace('|', '\|').Replace('<', '\<').Replace('>', '\>').Replace([System.Environment]::NewLine, '<br />')
+}
+
 
 # Find the paths to the standards.json file based on the current script path
 $StandardsJSONPath = Split-Path (Split-Path $PSScriptRoot)
@@ -49,7 +73,7 @@ foreach ($Standard in $StandardsInfo) {
 
     if ($Content -match $Regex) {
         $NewComment = [System.Collections.Generic.List[string]]::new()
-        # Add the initial scatic comments
+        # Add the initial static comments
         $NewComment.Add("<#`r`n")
         $NewComment.Add("   .FUNCTIONALITY`r`n")
         $NewComment.Add("       Internal`r`n")
@@ -60,10 +84,10 @@ foreach ($Standard in $StandardsInfo) {
         $NewComment.Add("   .DESCRIPTION`r`n")
         if ([string]::IsNullOrWhiteSpace($Standard.docsDescription)) {
             $NewComment.Add("       (Helptext) $($Standard.helpText.ToString())`r`n")
-            $NewComment.Add("       (DocsDescription) $($Standard.helpText.ToString())`r`n")
+            $NewComment.Add("       (DocsDescription) $(EscapeMarkdown($Standard.helpText.ToString()))`r`n")
         } else {
             $NewComment.Add("       (Helptext) $($Standard.helpText.ToString())`r`n")
-            $NewComment.Add("       (DocsDescription) $($Standard.docsDescription.ToString())`r`n")
+            $NewComment.Add("       (DocsDescription) $(EscapeMarkdown($Standard.docsDescription.ToString()))`r`n")
         }
         $NewComment.Add("   .NOTES`r`n")
 
@@ -83,7 +107,7 @@ foreach ($Standard in $StandardsInfo) {
                         }
                         continue
                     }
-                    $NewComment.Add("           $($Property.Value.ToString())`r`n")
+                    $NewComment.Add("           $(EscapeMarkdown($Property.Value.ToString()))`r`n")
                 }
             }
 
@@ -94,7 +118,25 @@ foreach ($Standard in $StandardsInfo) {
         $NewComment.Add("           Run the Tools\Update-StandardsComments.ps1 script to update this comment block`r`n")
         # -Online help link
         $NewComment.Add("   .LINK`r`n")
-        $NewComment.Add("       https://docs.cipp.app/user-documentation/tenant/standards/edit-standards`r`n")
+        $DocsLink = 'https://docs.cipp.app/user-documentation/tenant/standards/list-standards/'
+
+        switch ($Standard.cat) {
+            'Global Standards' { $DocsLink += 'global-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            'Entra (AAD) Standards' { $DocsLink += 'entra-aad-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            'Exchange Standards' { $DocsLink += 'exchange-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            'Defender Standards' { $DocsLink += 'defender-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            'Intune Standards' { $DocsLink += 'intune-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            'SharePoint Standards' { $DocsLink += 'sharepoint-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            'Teams Standards' { $DocsLink += 'teams-standards#' + $Standard.impact.ToLower() -replace ' ', '-' }
+            Default {}
+        }
+
+        switch ($Standard.impact) {
+            condition {  }
+            Default {}
+        }
+
+        $NewComment.Add("       $DocsLink`r`n")
         $NewComment.Add('   #>')
 
         # Write the new comment block to the file
@@ -102,7 +144,7 @@ foreach ($Standard in $StandardsInfo) {
             Write-Host "Would update $StandardsFilePath with the following comment block:"
             $NewComment
         } else {
-            $Content -replace $Regex, $NewComment | Set-Content -Path $StandardsFilePath -Encoding utf8 -NoNewLine
+            $Content -replace $Regex, $NewComment | Set-Content -Path $StandardsFilePath -Encoding utf8 -NoNewline
         }
     } else {
         Write-Host "No comment block found in $StandardsFilePath" -ForegroundColor Yellow
